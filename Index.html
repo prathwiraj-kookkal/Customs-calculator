@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>eBay Import Duty Estimator</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--tx:#1c1b19;--mu:#6b675e;--ac:#1f5f4a;--bd:#ddd8cc;--wn:#8a5a00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161614;--card:#211f1c;--tx:#eeeae0;--mu:#a29d90;--ac:#5fc2a0;--bd:#37342d;--wn:#e0b25a}}
+:root[data-theme="dark"]{--bg:#161614;--card:#211f1c;--tx:#eeeae0;--mu:#a29d90;--ac:#5fc2a0;--bd:#37342d;--wn:#e0b25a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 Georgia,'Times New Roman',serif}
+main{max-width:560px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.5rem;margin:0 0 4px}p.s{color:var(--mu);margin:0 0 18px;font-size:.95rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+label{display:block;font:600 .8rem system-ui,sans-serif;color:var(--mu);margin:10px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+input,select,button{width:100%;font:1rem system-ui,sans-serif;padding:11px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{background:var(--ac);color:#fff;border:0;font-weight:600;margin-top:12px;cursor:pointer}button.g{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+button:disabled{opacity:.5}
+table{width:100%;border-collapse:collapse;font-family:system-ui,sans-serif}td{padding:8px 0;border-bottom:1px solid var(--bd)}td:last-child{text-align:right}
+tr.t td{font-weight:700;font-size:1.15rem;border:0;color:var(--ac)}
+.n{font:.82rem/1.45 system-ui,sans-serif;color:var(--mu)}.w{color:var(--wn)}
+#prev{max-width:100%;max-height:160px;border-radius:8px;margin-top:8px;display:none}
+</style></head><body><main>
+<h1>⌚ eBay Import Duty Estimator</h1>
+<p class="s">Estimate duty, VAT and clearance before you hit “Buy”.</p>
+<div class="card">
+<label>eBay listing link (for your reference)</label><input id="lk" placeholder="https://www.ebay.com/itm/...">
+<div class="row"><div><label>Shipping from</label><select id="src"></select></div><div><label>Shipping to</label><select id="dst"></select></div></div>
+<label>Listing screenshot</label><input type="file" id="fl" accept="image/*"><img id="prev" alt="">
+<button id="rd" class="g" disabled>Read price from screenshot</button>
+<p class="n" id="rdn">Or fill in the details below manually.</p>
+</div>
+<div class="card">
+<div class="row"><div><label>Item price</label><input id="pr" type="number" inputmode="decimal" min="0"></div><div><label>Currency</label><select id="cu"></select></div></div>
+<div class="row"><div><label>Shipping cost</label><input id="sh" type="number" inputmode="decimal" min="0" value="0"></div><div><label>Shipping currency</label><select id="sc"></select></div></div>
+<label>Item type</label><select id="ct"><option value="watch">Watch (HS 9102)</option><option value="other">Other goods</option></select>
+<label>Duty rate % (auto-filled, editable)</label><input id="dr" type="number" step="0.1" min="0">
+<label>Courier clearance / handling fee (destination currency)</label><input id="fe" type="number" min="0">
+<button id="go">Calculate</button>
+</div>
+<div class="card" id="out" style="display:none"></div>
+<p class="n">Estimate only. Duty rates, FX and courier fees change; the final charge is set by the customs authority and your carrier. Always check the official tariff for your exact item. Rates here were last reviewed Nov 2026 and FX is approximate.</p>
+</main>
+<script>
+const $=i=>document.getElementById(i);
+// duty: watch / other (null = varies, user must enter). vat on (CIF+duty). fee = typical courier clearance fee.
+const D={
+AE:{n:"UAE",c:"AED",w:5,o:5,vat:5,fee:30,note:"5% duty on CIF + 5% VAT. Duty may be waived on very low-value parcels; check with your courier."},
+SA:{n:"Saudi Arabia",c:"SAR",w:5,o:5,vat:15,fee:40,note:"GCC 5% duty (some goods higher) + 15% VAT."},
+GB:{n:"United Kingdom",c:"GBP",w:4.5,o:null,vat:20,fee:12,note:"Consignments ≤ £135: no duty, VAT is collected by the seller/eBay at checkout. Above £135: duty + 20% VAT at the border."},
+SG:{n:"Singapore",c:"SGD",w:0,o:0,vat:9,fee:15,note:"No customs duty on most goods; 9% GST. GST may be collected at checkout by the platform."},
+IN:{n:"India",c:"INR",w:22,o:null,vat:18,fee:1500,note:"Watches: 20% basic duty + 10% surcharge on that duty (=22%), then 18% IGST."}};
+const FX={USD:1,GBP:.76,EUR:.88,JPY:150,AUD:1.52,CAD:1.38,AED:3.6725,SAR:3.75,SGD:1.30,INR:88,HKD:7.8,CHF:.80,CNY:7.2};
+const SRC={US:"United States",GB:"United Kingdom",DE:"Germany",FR:"France",IT:"Italy",JP:"Japan",CH:"Switzerland",HK:"Hong Kong",AU:"Australia",CA:"Canada",CN:"China",AE:"UAE",SA:"Saudi Arabia",SG:"Singapore",IN:"India"};
+const GCC=["AE","SA"];
+$("src").innerHTML=Object.entries(SRC).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
+$("dst").innerHTML=Object.entries(D).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join("");
+$("cu").innerHTML=Object.keys(FX).map(k=>`<option>${k}</option>`).join("");
+$("sc").innerHTML=$("cu").innerHTML;$("cu").onchange=()=>{$("sc").value=$("cu").value};
+$("dst").value="AE";
+function pre(){const d=D[$("dst").value],k=$("ct").value==="watch"?"w":"o";$("dr").value=d[k]??"";$("fe").value=d.fee;$("dr").placeholder=d[k]==null?"Rate varies – enter it":""}
+$("dst").onchange=$("ct").onchange=pre;pre();
+const mon=n=>n.toLocaleString(undefined,{maximumFractionDigits:2,minimumFractionDigits:2});
+$("go").onclick=()=>{
+ const dk=$("dst").value,d=D[dk],sk=$("src").value,cu=$("cu").value;
+ const pr=+$("pr").value,sh=+$("sh").value||0;
+ if(!pr){$("out").style.display="block";$("out").innerHTML='<p class="w">Enter the item price first.</p>';return}
+ const conv=(v,c)=>v/FX[c]*FX[d.c];
+ const itemC=conv(pr,cu),shipC=conv(sh,$("sc").value),cif=itemC+shipC;let rate=+$("dr").value||0;
+ const same=sk===dk,gcc=GCC.includes(sk)&&GCC.includes(dk);
+ let notes=[d.note];
+ if(same){rate=0;notes.unshift("Domestic shipment: no import duty or clearance.")}
+ else if(gcc){rate=0;notes.unshift("Both countries are in the GCC customs union: duty normally not charged again.")}
+ if(!same&&$("dr").value===""&&!gcc)notes.unshift('<span class="w">Duty rate not set for this item type – showing 0%. Enter the rate from the official tariff.</span>');
+ const duty=cif*rate/100,vat=same?0:(cif+duty)*d.vat/100,fee=same?0:(+$("fe").value||0);
+ const extra=duty+vat+fee;
+ $("out").style.display="block";
+ $("out").innerHTML=`<table>
+<tr><td>Item price (${d.c})</td><td>${mon(itemC)}</td></tr>
+<tr><td>Shipping (${d.c})</td><td>${mon(shipC)}</td></tr>
+<tr><td>Customs duty (${rate}%)</td><td>${mon(duty)}</td></tr>
+<tr><td>VAT / GST (${same?0:d.vat}%)</td><td>${mon(vat)}</td></tr>
+<tr><td>Clearance / handling</td><td>${mon(fee)}</td></tr>
+<tr class="t"><td>Extra to pay</td><td>${d.c} ${mon(extra)}</td></tr>
+<tr><td>Total landed cost</td><td>${d.c} ${mon(cif+extra)}</td></tr></table>
+<p class="n">${notes.join("<br>")}</p>`;
+ $("out").scrollIntoView({behavior:"smooth"});
+};
+let file=null,smp=null;
+$("fl").onchange=e=>{file=e.target.files[0]||null;const p=$("prev");if(file){p.src=URL.createObjectURL(file);p.style.display="block"}else p.style.display="none";$("rd").disabled=!(file&&smp)};
+(async()=>{try{const s=await claude.use("sample");if(s&&(await s.limits()).images){smp=s;$("rd").disabled=!file}else $("rdn").textContent="Screenshot reading isn’t available here – please enter the details manually."}catch(e){$("rdn").textContent="Screenshot reading isn’t available here – please enter the details manually."}})();
+$("rd").onclick=async()=>{
+ $("rd").disabled=true;$("rdn").textContent="Reading screenshot…";
+ try{
+  const r=await smp.json(`This is a screenshot of an eBay listing. Extract the details and reply ONLY with JSON: {"price":number (item price, no currency symbol),"currency":"ISO code","shipping":number (0 if free or not shown),"is_watch":boolean,"title":"short title"}. Use null for anything you cannot see.`,{images:[file],modelTier:"quick"});
+  if(r.price!=null)$("pr").value=r.price;
+  if(r.currency&&FX[r.currency]){$("cu").value=r.currency;$("sc").value=r.currency}
+  if(r.shipping!=null)$("sh").value=r.shipping;
+  if(r.is_watch!=null){$("ct").value=r.is_watch?"watch":"other";pre()}
+  $("rdn").textContent=`Read: ${r.title||"listing"}. Please check the numbers below.`;
+ }catch(e){$("rdn").textContent="Couldn’t read the screenshot – enter the details manually."}
+ $("rd").disabled=false;
+};
+</script></body></html>
